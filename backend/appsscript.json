@@ -1,0 +1,7 @@
+# FoundIt defaults for Google Apps Script
+{
+  "timeZone": "Asia/Manila",
+  "dependencies": {},
+  "exceptionLogging": "STACKDRIVER",
+  "runtimeVersion": "V8"
+}
