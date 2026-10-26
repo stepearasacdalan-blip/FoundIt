@@ -34,3 +34,10 @@ Google Apps Script web app cross-origin behavior can vary with deployment and br
 ## Security note
 
 This is an academic starter, not a production-ready campus service. Google Sheets is a limited datastore; Apps Script quotas, concurrency, audit retention, and abuse controls need review. Keep the spreadsheet private, deploy as the script owner only after reviewing authorization, and restrict the Apps Script deployment's audience as far as the sign-in/token design allows. See the security document.
+
+## Recent usability updates
+
+- HTML, CSS, JavaScript, and Apps Script source files are formatted with readable indentation.
+- Dark mode is controlled by the header toggle and saved in browser local storage, so it remains selected across navigation and browser restarts on that device.
+- A signed-in Google ID token is kept in session storage for page refreshes in the same browser tab. The backend validates it again on reload. Google ID tokens expire; if it is no longer valid, the user must sign in again. Signing out clears the saved token.
+- A lost report owner can choose **Mark recovered** from Recovery Center. It is removed from public reports after that action. When a two-party SafeReturn handover completes and exactly one of that claimant's open lost reports is the top rule-based match, the backend also marks that lost report returned. Ambiguous possible matches remain open and are never silently closed.

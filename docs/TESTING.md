@@ -1,29 +1,25 @@
-# Testing checklist and results
+# Project overview
 
-Results below describe checks performed in this workspace only; no external Google or GitHub configuration was available.
+## Purpose and users
 
-| Check | Result | Evidence / limit |
-|---|---|---|
-| Project structure and required source/document files | Passed | Reviewed local tree and confirmed frontend, backend, and setup docs exist. |
-| Public page does not contain sample reports | Passed | UI displays setup-required state when API URL is absent. |
-| Static form and browse interactions are wired | Passed (source inspection) | Search/filter, clear filters, detail dialog, sign-in prompt, report and claim submit handlers are present. |
-| SmartMatch categories/keywords/color/date/location rules | Passed (source inspection) | Server `match_` returns reasons and applies threshold 3. |
-| Backend claim and return authorization branches | Passed (source inspection) | Review checks report owner/staff; return checks claimant plus finder/staff and approved state. |
-| JavaScript syntax / browser rendering | Not tested | No runtime/browser test was performed. |
-| Apps Script deployment, Google token verification, sheet persistence | Blocked | Requires a configured Google project, sheet, OAuth client, and deployment. |
-| Cross-origin API fetch | Blocked | Requires testing the deployed endpoint from the final site origin; Apps Script redirect/CORS behavior can vary. |
-| Real notifications, approved claims, completed returns | Not tested | No real account activity was fabricated. |
-| GitHub repository / Pages deployment | Not done | No repository credentials or publication authorization/configuration supplied. |
+FoundIt helps campus members publish safe public reports, find possible related reports, verify claims using private clues, and record a safe item return. Guests can browse. A verified Google account is required for reporting, claiming, watchlist, and recovery actions. A report owner or allowlisted staff member can review claims for that item.
 
-Before a pilot, execute the two-account walkthrough in `SETUP_GUIDE.md` and update these results with observed outcomes.
+## Workflow and states
 
-## User-run checks (reported 2026-10)
+The normal journey is **Reported → Possible Match → Claim Submitted → Verification → Approved → Return Confirmed**. Alternatives include **No Match Yet** (no rule score meets the threshold), **Additional Information Needed** (`MORE_INFO`), **Rejected**, and **Disputed**. The initial report status is `OPEN`; it becomes `RETURNED` when claimant and authorized finder each confirm an approved SafeReturn claim. The public board hides returned reports; the lost-report owner can also mark a report recovered from their Recovery Center when the item was recovered outside this claim flow. The system does not claim that a possible match proves ownership.
 
-| Check | Result | Evidence |
-|---|---|---|
-| Google sign-in and session | Passed | User confirmed sign-in works after the client and Apps Script URL were configured and the client-side form selector bug was fixed. |
-| Spreadsheet initialization | Passed | User confirmed `setupSheets` created the expected tabs after setting `SPREADSHEET_ID`. |
-| Report submission and public list | Passed | User confirmed a submitted report appeared in Latest reports; screenshot showed one report loaded. |
-| Claim submission | Passed | User confirmed a claim was submitted. |
-| Claim review, SafeReturn two-party confirmation | Not yet verified | Requires the report owner and claimant to complete the full handover flow. |
-| Responsive layout at device widths | Source review only | CSS includes mobile breakpoints, compact header/navigation, responsive grids, and reduced-motion rules; no device screenshot test was run in this environment. |
+## SmartMatch rules
+
+The server compares a lost report with open found reports. It adds points for same category (3), up to three shared words longer than three characters in title/description (1 each), same color family, whether typed or estimated from the photo (2), same exact general-area text (1), and dates within 14 days (1). Scores of at least 3 are surfaced as possible matches. Reasons are returned with the score. These rules are a starting point and can produce false positives or miss matches; people must review them.
+
+## Privacy boundary
+
+Public reports contain title, category, public description, color, approximate date, general area, status, and creation date. They do not contain owner email or claim clues. Claims contain claimant email, private clues, and private reviewer notes. Only the claimant, the report owner, and allowlisted staff can receive the relevant claim record from `myRecovery`; server endpoints independently recheck permissions for every decision.
+
+## Photos and image-assisted matching
+
+Reports may include an optional photo. The browser resizes/re-encodes it as a small JPEG (up to about 30 KB) and estimates a broad color family from sampled pixels. The photo is public with the report. SmartMatch compares the photo's estimated color family with the other report's typed or estimated color, alongside the text, category, location, and date rules. It does not use computer vision to identify the object itself. The estimate is a clue only; people still verify ownership with ClueLock.
+
+The Reports sheet adds `imageData` and `imageColor` columns. After updating `Code.gs`, run `setupSheets` once to append missing headers to an existing sheet, then deploy a new Apps Script version. Existing report rows remain in place. The backend rejects image data over 40,000 characters to stay under a Sheets cell limit. Avoid photos containing faces, IDs, serial numbers, or other private information.
+
+

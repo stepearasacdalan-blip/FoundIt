@@ -1,32 +1,721 @@
-const SHEETS={Reports:['id','type','title','category','description','color','approxDate','location','ownerEmail','status','createdAt'],Claims:['id','itemId','itemTitle','claimantEmail','privateClues','message','status','reviewerEmail','reviewNote','returnRef','claimantConfirmed','finderConfirmed','createdAt','updatedAt'],Watchlist:['id','userEmail','itemId','createdAt'],Notifications:['id','userEmail','type','title','body','itemId','read','createdAt'],AuditLog:['id','actorEmail','action','targetId','details','createdAt']};
-function doGet(){return json({ok:true,service:'FoundIt API',message:'Use POST for application actions.'})}
-function doPost(e){try{var body=JSON.parse((e&&e.postData&&e.postData.contents)||'{}');var action=body.action;if(action==='listPublic')return json({ok:true,items:publicReports_()});if(action==='session'){var user=auth_(body.token);return json({ok:true,user:{email:user.email}})}var user=auth_(body.token);var result=dispatch_(action,body,user);return json(Object.assign({ok:true},result||{}))}catch(err){return json({ok:false,error:err.message||'Request failed.'})}}
-function dispatch_(action,b,u){if(action==='createReport')return createReport_(b,u);if(action==='submitClaim')return submitClaim_(b,u);if(action==='myRecovery')return myRecovery_(u);if(action==='watchReport')return watchReport_(b,u);if(action==='reviewClaim')return reviewClaim_(b,u);if(action==='confirmReturn')return confirmReturn_(b,u);if(action==='requestInfo')return requestInfo_(b,u);if(action==='addInfo')return addInfo_(b,u);if(action==='escalateClaim')return reviewClaim_(Object.assign({},b,{decision:'DISPUTED'}),u);throw Error('Unknown action.')}
-function db_(){var id=PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');if(!id)throw Error('Backend setup incomplete: set SPREADSHEET_ID in Apps Script properties.');return SpreadsheetApp.openById(id)}
-function setupSheets(){var ss=db_();Object.keys(SHEETS).forEach(function(name){var s=ss.getSheetByName(name)||ss.insertSheet(name);if(s.getLastRow()===0)s.appendRow(SHEETS[name])});return 'Headers are ready.'}
-function rows_(name){var s=db_().getSheetByName(name);if(!s)throw Error('Run setupSheets first. Missing '+name+'.');var v=s.getDataRange().getValues();if(v.length<2)return[];return v.slice(1).filter(function(r){return r[0]!==''}).map(function(r){var o={};SHEETS[name].forEach(function(k,i){o[k]=r[i] instanceof Date?r[i].toISOString():r[i]});return o})}
-function add_(name,obj){var s=db_().getSheetByName(name);if(!s)throw Error('Run setupSheets first. Missing '+name+'.');s.appendRow(SHEETS[name].map(function(k){return obj[k]===undefined?'':obj[k]}))}
-function update_(name,id,patch){var s=db_().getSheetByName(name),vals=s.getDataRange().getValues(),head=vals[0],ix=head.indexOf('id');for(var i=1;i<vals.length;i++)if(String(vals[i][ix])===String(id)){Object.keys(patch).forEach(function(k){var c=head.indexOf(k);if(c>=0)s.getRange(i+1,c+1).setValue(patch[k])});return}throw Error('Record not found.')}
-function auth_(token){if(!token)throw Error('Sign in is required.');var client=PropertiesService.getScriptProperties().getProperty('OAUTH_CLIENT_ID');if(!client)throw Error('Backend setup incomplete: set OAUTH_CLIENT_ID.');var url='https://oauth2.googleapis.com/tokeninfo?id_token='+encodeURIComponent(token);var resp=UrlFetchApp.fetch(url,{muteHttpExceptions:true});if(resp.getResponseCode()!==200)throw Error('Google sign-in could not be verified.');var x=JSON.parse(resp.getContentText());if(x.aud!==client||String(x.email_verified)!=='true'||!x.email)throw Error('Google identity token is invalid or not verified.');return{email:String(x.email).toLowerCase()}}
-function publicReports_(){return rows_('Reports').filter(function(x){return x.status!=='REMOVED'&&x.status!=='RETURNED'}).map(function(x){delete x.ownerEmail;return x}).sort(function(a,b){return String(b.createdAt).localeCompare(String(a.createdAt))})}
-function createReport_(b,u){var type=String(b.type||'').toUpperCase(),title=clean_(b.title,90),category=clean_(b.category,50),description=clean_(b.description,600),location=clean_(b.location,100);if(['LOST','FOUND'].indexOf(type)<0||!title||!category||!description||!location)throw Error('Complete the required report fields.');var item={id:Utilities.getUuid(),type:type,title:title,category:category,description:description,color:clean_(b.color,40),approxDate:clean_(b.approxDate,20),location:location,ownerEmail:u.email,status:'OPEN',createdAt:new Date().toISOString()};add_('Reports',item);if(type==='LOST')createMatches_(item);else createWatchlistMatches_(item);return{item:{id:item.id,status:item.status},matches:type==='LOST'?matchingFound_(item):[]}}
-function createMatches_(lost){var found=rows_('Reports').filter(function(x){return x.type==='FOUND'&&x.status==='OPEN'});found.forEach(function(f){var m=match_(lost,f);if(m.score>=3){var msg='Possible match: '+lost.title+' and '+f.title+'. '+m.reasons.join('; ')+'.';notify_(lost.ownerEmail,'POSSIBLE_MATCH','A possible item match',msg,lost.id);notify_(f.ownerEmail,'POSSIBLE_MATCH','A possible item match',msg,f.id)}})}
-function createWatchlistMatches_(found){rows_('Watchlist').forEach(function(w){var lost=find_('Reports',w.itemId);if(lost&&lost.ownerEmail===w.userEmail&&lost.status==='OPEN'){var m=match_(lost,found);if(m.score>=3)notify_(w.userEmail,'WATCHLIST_MATCH','A new report may match your watchlist','Possible match for '+lost.title+': '+m.reasons.join('; ')+'.',found.id)}})}\nfunction matchingFound_(lost){return rows_('Reports').filter(function(x){return x.type==='FOUND'&&x.status==='OPEN'}).map(function(f){var m=match_(lost,f);return{itemId:f.id,score:m.score,reasons:m.reasons}}).filter(function(x){return x.score>=3}).sort(function(a,b){return b.score-a.score})}
-function match_(a,b){var score=0,r=[];if(a.category&&a.category===b.category){score+=3;r.push('same category')}var words=(String(a.title)+' '+String(a.description)).toLowerCase().match(/[a-z0-9]{4,}/g)||[],other=(String(b.title)+' '+String(b.description)).toLowerCase();var shared=[...new Set(words.filter(function(w){return other.indexOf(w)>=0}))].slice(0,4);if(shared.length){score+=Math.min(3,shared.length);r.push('shared words: '+shared.join(', '))}if(a.color&&b.color&&String(a.color).toLowerCase()===String(b.color).toLowerCase()){score+=2;r.push('same color')}if(a.location&&b.location&&String(a.location).toLowerCase()===String(b.location).toLowerCase()){score++;r.push('same general area')}if(a.approxDate&&b.approxDate&&Math.abs(new Date(a.approxDate)-new Date(b.approxDate))<14*864e5){score++;r.push('dates within two weeks')}return{score:score,reasons:r}}
-function submitClaim_(b,u){var item=find_('Reports',b.itemId);if(!item||item.type!=='FOUND'||item.status==='RETURNED')throw Error('This item is not available to claim.');var clue=clean_(b.privateClues,1200);if(!clue)throw Error('Private identifying clues are required.');var claim={id:Utilities.getUuid(),itemId:item.id,itemTitle:item.title,claimantEmail:u.email,privateClues:clue,message:clean_(b.message,500),status:'SUBMITTED',reviewerEmail:'',reviewNote:'',returnRef:'',claimantConfirmed:false,finderConfirmed:false,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()};add_('Claims',claim);notify_(item.ownerEmail,'CLAIM_SUBMITTED','A claim needs review','A claimant submitted private ownership details for '+item.title+'.',item.id);notify_(u.email,'CLAIM_STATUS','Claim submitted','Your claim is awaiting an authorized reviewer.',item.id);return{claim:{id:claim.id,status:claim.status}}}
-function myRecovery_(u){var reports=rows_('Reports').filter(function(x){return x.ownerEmail===u.email});var claims=rows_('Claims').filter(function(x){return x.claimantEmail===u.email||reports.some(function(it){return it.id===x.itemId})||isStaff_(u.email)}).map(function(x){var ownClaim=x.claimantEmail===u.email;var allowedReview=(reports.some(function(it){return it.id===x.itemId})||isStaff_(u.email))&&x.claimantEmail!==u.email;x.canReview=allowedReview;if(!ownClaim&&!allowedReview){delete x.privateClues;delete x.message}return x});var notes=rows_('Notifications').filter(function(x){return x.userEmail===u.email}).map(function(x){delete x.userEmail;return x});var matches=[];reports.filter(function(x){return x.type==='LOST'&&x.status==='OPEN'}).forEach(function(l){matchingFound_(l).forEach(function(m){matches.push({lostTitle:l.title,itemId:m.itemId,score:m.score,reasons:m.reasons})})});return{reports:reports.map(function(x){delete x.ownerEmail;return x}),claims:claims,notifications:notes,matches:matches}}
-function watchReport_(b,u){var item=find_('Reports',b.itemId);if(!item||item.ownerEmail!==u.email||item.type!=='LOST')throw Error('You can watch only your own lost reports.');if(rows_('Watchlist').some(function(x){return x.userEmail===u.email&&x.itemId===item.id}))return{};add_('Watchlist',{id:Utilities.getUuid(),userEmail:u.email,itemId:item.id,createdAt:new Date().toISOString()});return{}}
-function reviewClaim_(b,u){var c=find_('Claims',b.claimId),item=c&&find_('Reports',c.itemId);if(!c||!item)throw Error('Claim not found.');if((item.ownerEmail!==u.email&&!isStaff_(u.email))||c.claimantEmail===u.email)throw Error('Only a different authorized item reporter or staff reviewer can review this claim.');var decision=String(b.decision||'').toUpperCase();if(['APPROVED','REJECTED','DISPUTED'].indexOf(decision)<0)throw Error('Choose approve, reject, or escalate.');var patch={status:decision,reviewerEmail:u.email,reviewNote:clean_(b.note,500),updatedAt:new Date().toISOString()};if(decision==='APPROVED')patch.returnRef='SR-'+Utilities.getUuid().replace(/-/g,'').substring(0,12).toUpperCase();update_('Claims',c.id,patch);notify_(c.claimantEmail,'CLAIM_STATUS','Claim '+decision.toLowerCase(),decision==='APPROVED'?'Your SafeReturn pass is ready. Reference: '+patch.returnRef:patch.reviewNote||'Your claim status changed to '+decision+'.',c.itemId);return{status:decision,returnRef:patch.returnRef||''}}
-function requestInfo_(b,u){var c=find_('Claims',b.claimId),item=c&&find_('Reports',c.itemId);if(!c||!item)throw Error('Claim not found.');if((item.ownerEmail!==u.email&&!isStaff_(u.email))||c.claimantEmail===u.email)throw Error('Only a different authorized item reporter or staff reviewer can request more information.');var note=clean_(b.note,500);if(!note)throw Error('Add a short request for more information.');update_('Claims',c.id,{status:'MORE_INFO',reviewerEmail:u.email,reviewNote:note,updatedAt:new Date().toISOString()});notify_(c.claimantEmail,'CLAIM_STATUS','More information needed',note,c.itemId);return{status:'MORE_INFO'}}
-function confirmReturn_(b,u){var c=find_('Claims',b.claimId),item=c&&find_('Reports',c.itemId);if(!c||c.status!=='APPROVED'||!c.returnRef)throw Error('An approved SafeReturn pass is required.');if(u.email===c.claimantEmail)update_('Claims',c.id,{claimantConfirmed:true,updatedAt:new Date().toISOString()});else if(u.email===item.ownerEmail||isStaff_(u.email))update_('Claims',c.id,{finderConfirmed:true,updatedAt:new Date().toISOString()});else throw Error('Only the claimant and authorized finder can confirm this handover.');var updated=find_('Claims',c.id);if(updated.claimantConfirmed===true&&updated.finderConfirmed===true){update_('Claims',c.id,{status:'RETURNED',updatedAt:new Date().toISOString()});update_('Reports',item.id,{status:'RETURNED'});notify_(c.claimantEmail,'RETURN_CONFIRMED','Return confirmed','Both parties confirmed the item handover.',item.id);notify_(item.ownerEmail,'RETURN_CONFIRMED','Return confirmed','Both parties confirmed the item handover.',item.id);return{status:'RETURNED'}}return{status:'APPROVED',message:'Your confirmation is saved; the other authorized party must also confirm.'}}
-function find_(sheet,id){return rows_(sheet).filter(function(x){return String(x.id)===String(id)})[0]}
-function isStaff_(email){return(String(PropertiesService.getScriptProperties().getProperty('STAFF_EMAILS')||'').toLowerCase().split(',').map(function(x){return x.trim()}).indexOf(email)>=0)}
-function notify_(email,type,title,body,itemId){add_('Notifications',{id:Utilities.getUuid(),userEmail:email,type:type,title:clean_(title,100),body:clean_(body,400),itemId:itemId,read:false,createdAt:new Date().toISOString()});if(type==='POSSIBLE_MATCH'){rows_('Watchlist').filter(function(w){return w.userEmail===email}).forEach(function(w){if(w.itemId!==itemId){var lost=find_('Reports',w.itemId),found=find_('Reports',itemId);if(lost&&found&&match_(lost,found).score>=3)add_('Notifications',{id:Utilities.getUuid(),userEmail:email,type:'WATCHLIST_MATCH',title:'A new report may match your watchlist',body:'A new possible match is available. Review its clues in the public board.',itemId:itemId,read:false,createdAt:new Date().toISOString()})}})}}
-function clean_(v,max){return String(v||'').replace(/[\u0000-\u001f]/g,' ').trim().substring(0,max)}
-function json(obj){return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON)}
+const SHEETS = {
+  Reports: [
+    "id",
+    "type",
+    "title",
+    "category",
+    "description",
+    "color",
+    "approx.Date",
+    "location",
+    "ownerEmail",
+    "status",
+    "createdAt",
+    "imageData",
+    "imageColor",
+  ],
+  Claims: [
+    "id",
+    "itemId",
+    "itemTitle",
+    "claimantEmail",
+    "privateClues",
+    "message",
+    "status",
+    "reviewerEmail",
+    "reviewNote",
+    "returnRef",
+    "claimantConfirmed",
+    "finderConfirmed",
+    "createdAt",
+    "updatedAt",
+  ],
+  Watchlist: ["id", "userEmail", "itemId", "createdAt"],
+  Notifications: [
+    "id",
+    "userEmail",
+    "type",
+    "title",
+    "body",
+    "itemId",
+    "read",
+    "createdAt",
+  ],
+  AuditLog: ["id", "actorEmail", "action", "targetId", "details", "createdAt"],
+};
+function doGet() {
+  return json({
+    ok: true,
+    service: "FoundIt API",
+    message: "Use POST for application actions.",
+  });
+}
+function doPost(e) {
+  try {
+    var body = JSON.parse((e && e.postData && e.postData.contents) || "{}");
+    var action = body.action;
+    if (action === "listPublic")
+      return json({ ok: true, items: publicReports_() });
+    if (action === "session") {
+      var user = auth_(body.token);
+      return json({ ok: true, user: { email: user.email } });
+    }
+    var user = auth_(body.token);
+    var result = dispatch_(action, body, user);
+    return json(Object.assign({ ok: true }, result || {}));
+  } catch (err) {
+    return json({ ok: false, error: err.message || "Request failed." });
+  }
+}
+function dispatch_(action, b, u) {
+  if (action === "createReport") return createReport_(b, u);
+  if (action === "submitClaim") return submitClaim_(b, u);
+  if (action === "myRecovery") return myRecovery_(u);
+  if (action === "watchReport") return watchReport_(b, u);
+  if (action === "resolveLostReport") return resolveLostReport_(b, u);
+  if (action === "reviewClaim") return reviewClaim_(b, u);
+  if (action === "confirmReturn") return confirmReturn_(b, u);
+  if (action === "requestInfo") return requestInfo_(b, u);
+  if (action === "addInfo") return addInfo_(b, u);
+  if (action === "escalateClaim")
+    return reviewClaim_(Object.assign({}, b, { decision: "DISPUTED" }), u);
+  throw Error("Unknown action.");
+}
+function db_() {
+  var id =
+    PropertiesService.getScriptProperties().getProperty("SPREADSHEET_ID");
+  if (!id)
+    throw Error(
+      "Backend setup incomplete: set SPREADSHEET_ID in Apps Script properties.",
+    );
+  return SpreadsheetApp.openById(id);
+}
+function setupSheets() {
+  var ss = db_();
+  Object.keys(SHEETS).forEach(function (name) {
+    var s = ss.getSheetByName(name) || ss.insertSheet(name);
+    if (s.getLastRow() === 0) s.appendRow(SHEETS[name]);
+    else {
+      var headers = s.getRange(1, 1, 1, s.getLastColumn()).getValues()[0];
+      SHEETS[name].forEach(function (key) {
+        if (headers.indexOf(key) < 0) {
+          headers.push(key);
+          s.getRange(1, headers.length).setValue(key);
+        }
+      });
+    }
+  });
+  return "Headers are ready.";
+}
+function rows_(name) {
+  var s = db_().getSheetByName(name);
+  if (!s) throw Error("Run setupSheets first. Missing " + name + ".");
+  var v = s.getDataRange().getValues();
+  if (v.length < 2) return [];
+  var headers = v[0];
+  return v
+    .slice(1)
+    .filter(function (r) {
+      return r[0] !== "";
+    })
+    .map(function (r) {
+      var o = {};
+      headers.forEach(function (k, i) {
+        if (k) o[k] = r[i] instanceof Date ? r[i].toISOString() : r[i];
+      });
+      return o;
+    });
+}
+function add_(name, obj) {
+  var s = db_().getSheetByName(name);
+  if (!s) throw Error("Run setupSheets first. Missing " + name + ".");
+  s.appendRow(
+    SHEETS[name].map(function (k) {
+      return obj[k] === undefined ? "" : obj[k];
+    }),
+  );
+}
+function update_(name, id, patch) {
+  var s = db_().getSheetByName(name),
+    vals = s.getDataRange().getValues(),
+    head = vals[0],
+    ix = head.indexOf("id");
+  for (var i = 1; i < vals.length; i++)
+    if (String(vals[i][ix]) === String(id)) {
+      Object.keys(patch).forEach(function (k) {
+        var c = head.indexOf(k);
+        if (c >= 0) s.getRange(i + 1, c + 1).setValue(patch[k]);
+      });
+      return;
+    }
+  throw Error("Record not found.");
+}
+function auth_(token) {
+  if (!token) throw Error("Sign in is required.");
+  var client =
+    PropertiesService.getScriptProperties().getProperty("OAUTH_CLIENT_ID");
+  if (!client) throw Error("Backend setup incomplete: set OAUTH_CLIENT_ID.");
+  var url =
+    "https://oauth2.googleapis.com/tokeninfo?id_token=" +
+    encodeURIComponent(token);
+  var resp = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+  if (resp.getResponseCode() !== 200)
+    throw Error("Google sign-in could not be verified.");
+  var x = JSON.parse(resp.getContentText());
+  if (x.aud !== client || String(x.email_verified) !== "true" || !x.email)
+    throw Error("Google identity token is invalid or not verified.");
+  return { email: String(x.email).toLowerCase() };
+}
+function publicReports_() {
+  return rows_("Reports")
+    .filter(function (x) {
+      return ["REMOVED", "RETURNED", "RECOVERED"].indexOf(x.status) < 0;
+    })
+    .map(function (x) {
+      delete x.ownerEmail;
+      return x;
+    })
+    .sort(function (a, b) {
+      return String(b.createdAt).localeCompare(String(a.createdAt));
+    });
+}
+function createReport_(b, u) {
+  var type = String(b.type || "").toUpperCase(),
+    title = clean_(b.title, 90),
+    category = clean_(b.category, 50),
+    description = clean_(b.description, 600),
+    location = clean_(b.location, 100);
+  if (
+    ["LOST", "FOUND"].indexOf(type) < 0 ||
+    !title ||
+    !category ||
+    !description ||
+    !location
+  )
+    throw Error("Complete the required report fields.");
+  var item = {
+    id: Utilities.getUuid(),
+    type: type,
+    title: title,
+    category: category,
+    description: description,
+    color: clean_(b.color || b.imageColor, 40),
+    imageColor: clean_(b.imageColor, 40),
+    imageData: String(b.imageData || ""),
+    approxDate: clean_(b.approxDate, 20),
+    location: location,
+    ownerEmail: u.email,
+    status: "OPEN",
+    createdAt: new Date().toISOString(),
+  };
+  if (item.imageData && (!/^data:image\/(jpeg|png|webp);base64,/.test(item.imageData) || item.imageData.length > 40000)) {
+    throw Error("The item photo is too large or has an unsupported format. Choose a smaller image.");
+  }
+  add_("Reports", item);
+  if (type === "LOST") createMatches_(item);
+  else createWatchlistMatches_(item);
+  return {
+    item: { id: item.id, status: item.status },
+    matches: type === "LOST" ? matchingFound_(item) : [],
+  };
+}
+function createMatches_(lost) {
+  var found = rows_("Reports").filter(function (x) {
+    return x.type === "FOUND" && x.status === "OPEN";
+  });
+  found.forEach(function (f) {
+    var m = match_(lost, f);
+    if (m.score >= 3) {
+      var msg =
+        "Possible match: " +
+        lost.title +
+        " and " +
+        f.title +
+        ". " +
+        m.reasons.join("; ") +
+        ".";
+      notify_(
+        lost.ownerEmail,
+        "POSSIBLE_MATCH",
+        "A possible item match",
+        msg,
+        lost.id,
+      );
+      notify_(
+        f.ownerEmail,
+        "POSSIBLE_MATCH",
+        "A possible item match",
+        msg,
+        f.id,
+      );
+    }
+  });
+}
+function createWatchlistMatches_(found) {
+  rows_("Watchlist").forEach(function (w) {
+    var lost = find_("Reports", w.itemId);
+    if (lost && lost.ownerEmail === w.userEmail && lost.status === "OPEN") {
+      var m = match_(lost, found);
+      if (m.score >= 3)
+        notify_(
+          w.userEmail,
+          "WATCHLIST_MATCH",
+          "A new report may match your watchlist",
+          "Possible match for " +
+            lost.title +
+            ": " +
+            m.reasons.join("; ") +
+            ".",
+          found.id,
+        );
+    }
+  });
+}
+function matchingFound_(lost) {
+  return rows_("Reports")
+    .filter(function (x) {
+      return x.type === "FOUND" && x.status === "OPEN";
+    })
+    .map(function (f) {
+      var m = match_(lost, f);
+      return { itemId: f.id, score: m.score, reasons: m.reasons };
+    })
+    .filter(function (x) {
+      return x.score >= 3;
+    })
+    .sort(function (a, b) {
+      return b.score - a.score;
+    });
+}
+function colorFamily_(value) {
+  var color = String(value || "").toLowerCase();
+  var groups = {
+    black: ["black", "charcoal"],
+    white: ["white", "cream", "ivory"],
+    gray: ["gray", "grey", "silver"],
+    blue: ["blue", "navy", "teal", "turquoise", "cyan"],
+    green: ["green", "olive", "mint"],
+    red: ["red", "maroon", "burgundy"],
+    pink: ["pink", "magenta"],
+    purple: ["purple", "violet", "lavender"],
+    orange: ["orange", "peach", "coral"],
+    yellow: ["yellow", "gold"],
+    brown: ["brown", "tan", "beige", "khaki"],
+  };
+  var names = Object.keys(groups);
+  for (var i = 0; i < names.length; i++)
+    if (groups[names[i]].some(function (word) { return color.indexOf(word) >= 0; }))
+      return names[i];
+  return color;
+}
+function match_(a, b) {
+  var score = 0,
+    r = [];
+  if (a.category && a.category === b.category) {
+    score += 3;
+    r.push("same category");
+  }
+  var words =
+      (String(a.title) + " " + String(a.description))
+        .toLowerCase()
+        .match(/[a-z0-9]{4,}/g) || [],
+    other = (String(b.title) + " " + String(b.description)).toLowerCase();
+  var shared = [
+    ...new Set(
+      words.filter(function (w) {
+        return other.indexOf(w) >= 0;
+      }),
+    ),
+  ].slice(0, 4);
+  if (shared.length) {
+    score += Math.min(3, shared.length);
+    r.push("shared words: " + shared.join(", "));
+  }
+  var colorsA = [a.color, a.imageColor].map(colorFamily_).filter(Boolean);
+  var colorsB = [b.color, b.imageColor].map(colorFamily_).filter(Boolean);
+  var sharedColor = colorsA.some(function (color) {
+    return colorsB.indexOf(color) >= 0;
+  });
+  if (sharedColor) {
+    score += 2;
+    r.push("similar color (typed or estimated from the photo)");
+  }
+  if (
+    a.location &&
+    b.location &&
+    String(a.location).toLowerCase() === String(b.location).toLowerCase()
+  ) {
+    score++;
+    r.push("same general area");
+  }
+  if (
+    a.approxDate &&
+    b.approxDate &&
+    Math.abs(new Date(a.approxDate) - new Date(b.approxDate)) < 14 * 864e5
+  ) {
+    score++;
+    r.push("dates within two weeks");
+  }
+  return { score: score, reasons: r };
+}
+function submitClaim_(b, u) {
+  var item = find_("Reports", b.itemId);
+  if (!item || item.type !== "FOUND" || item.status === "RETURNED")
+    throw Error("This item is not available to claim.");
+  var clue = clean_(b.privateClues, 1200);
+  if (!clue) throw Error("Private identifying clues are required.");
+  var claim = {
+    id: Utilities.getUuid(),
+    itemId: item.id,
+    itemTitle: item.title,
+    claimantEmail: u.email,
+    privateClues: clue,
+    message: clean_(b.message, 500),
+    status: "SUBMITTED",
+    reviewerEmail: "",
+    reviewNote: "",
+    returnRef: "",
+    claimantConfirmed: false,
+    finderConfirmed: false,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  add_("Claims", claim);
+  notify_(
+    item.ownerEmail,
+    "CLAIM_SUBMITTED",
+    "A claim needs review",
+    "A claimant submitted private ownership details for " + item.title + ".",
+    item.id,
+  );
+  notify_(
+    u.email,
+    "CLAIM_STATUS",
+    "Claim submitted",
+    "Your claim is awaiting an authorized reviewer.",
+    item.id,
+  );
+  return { claim: { id: claim.id, status: claim.status } };
+}
+function myRecovery_(u) {
+  var reports = rows_("Reports").filter(function (x) {
+    return x.ownerEmail === u.email;
+  });
+  var claims = rows_("Claims")
+    .filter(function (x) {
+      return (
+        x.claimantEmail === u.email ||
+        reports.some(function (it) {
+          return it.id === x.itemId;
+        }) ||
+        isStaff_(u.email)
+      );
+    })
+    .map(function (x) {
+      var ownClaim = x.claimantEmail === u.email;
+      var allowedReview =
+        (reports.some(function (it) {
+          return it.id === x.itemId;
+        }) ||
+          isStaff_(u.email)) &&
+        x.claimantEmail !== u.email;
+      x.canReview = allowedReview;
+      if (!ownClaim && !allowedReview) {
+        delete x.privateClues;
+        delete x.message;
+      }
+      return x;
+    });
+  var notes = rows_("Notifications")
+    .filter(function (x) {
+      return x.userEmail === u.email;
+    })
+    .map(function (x) {
+      delete x.userEmail;
+      return x;
+    });
+  var matches = [];
+  reports
+    .filter(function (x) {
+      return x.type === "LOST" && x.status === "OPEN";
+    })
+    .forEach(function (l) {
+      matchingFound_(l).forEach(function (m) {
+        matches.push({
+          lostTitle: l.title,
+          itemId: m.itemId,
+          score: m.score,
+          reasons: m.reasons,
+        });
+      });
+    });
+  return {
+    reports: reports.map(function (x) {
+      delete x.ownerEmail;
+      return x;
+    }),
+    claims: claims,
+    notifications: notes,
+    matches: matches,
+  };
+}
+function watchReport_(b, u) {
+  var item = find_("Reports", b.itemId);
+  if (!item || item.ownerEmail !== u.email || item.type !== "LOST")
+    throw Error("You can watch only your own lost reports.");
+  if (
+    rows_("Watchlist").some(function (x) {
+      return x.userEmail === u.email && x.itemId === item.id;
+    })
+  )
+    return {};
+  add_("Watchlist", {
+    id: Utilities.getUuid(),
+    userEmail: u.email,
+    itemId: item.id,
+    createdAt: new Date().toISOString(),
+  });
+  return {};
+}
+function reviewClaim_(b, u) {
+  var c = find_("Claims", b.claimId),
+    item = c && find_("Reports", c.itemId);
+  if (!c || !item) throw Error("Claim not found.");
+  if (
+    (item.ownerEmail !== u.email && !isStaff_(u.email)) ||
+    c.claimantEmail === u.email
+  )
+    throw Error(
+      "Only a different authorized item reporter or staff reviewer can review this claim.",
+    );
+  var decision = String(b.decision || "").toUpperCase();
+  if (["APPROVED", "REJECTED", "DISPUTED"].indexOf(decision) < 0)
+    throw Error("Choose approve, reject, or escalate.");
+  var patch = {
+    status: decision,
+    reviewerEmail: u.email,
+    reviewNote: clean_(b.note, 500),
+    updatedAt: new Date().toISOString(),
+  };
+  if (decision === "APPROVED")
+    patch.returnRef =
+      "SR-" +
+      Utilities.getUuid().replace(/-/g, "").substring(0, 12).toUpperCase();
+  update_("Claims", c.id, patch);
+  notify_(
+    c.claimantEmail,
+    "CLAIM_STATUS",
+    "Claim " + decision.toLowerCase(),
+    decision === "APPROVED"
+      ? "Your SafeReturn pass is ready. Reference: " + patch.returnRef
+      : patch.reviewNote || "Your claim status changed to " + decision + ".",
+    c.itemId,
+  );
+  return { status: decision, returnRef: patch.returnRef || "" };
+}
+function requestInfo_(b, u) {
+  var c = find_("Claims", b.claimId),
+    item = c && find_("Reports", c.itemId);
+  if (!c || !item) throw Error("Claim not found.");
+  if (
+    (item.ownerEmail !== u.email && !isStaff_(u.email)) ||
+    c.claimantEmail === u.email
+  )
+    throw Error(
+      "Only a different authorized item reporter or staff reviewer can request more information.",
+    );
+  var note = clean_(b.note, 500);
+  if (!note) throw Error("Add a short request for more information.");
+  update_("Claims", c.id, {
+    status: "MORE_INFO",
+    reviewerEmail: u.email,
+    reviewNote: note,
+    updatedAt: new Date().toISOString(),
+  });
+  notify_(
+    c.claimantEmail,
+    "CLAIM_STATUS",
+    "More information needed",
+    note,
+    c.itemId,
+  );
+  return { status: "MORE_INFO" };
+}
+function confirmReturn_(b, u) {
+  var c = find_("Claims", b.claimId),
+    item = c && find_("Reports", c.itemId);
+  if (!c || c.status !== "APPROVED" || !c.returnRef)
+    throw Error("An approved SafeReturn pass is required.");
+  if (u.email === c.claimantEmail)
+    update_("Claims", c.id, {
+      claimantConfirmed: true,
+      updatedAt: new Date().toISOString(),
+    });
+  else if (u.email === item.ownerEmail || isStaff_(u.email))
+    update_("Claims", c.id, {
+      finderConfirmed: true,
+      updatedAt: new Date().toISOString(),
+    });
+  else
+    throw Error(
+      "Only the claimant and authorized finder can confirm this handover.",
+    );
+  var updated = find_("Claims", c.id);
+  if (updated.claimantConfirmed === true && updated.finderConfirmed === true) {
+    update_("Claims", c.id, {
+      status: "RETURNED",
+      updatedAt: new Date().toISOString(),
+    });
+    update_("Reports", item.id, { status: "RETURNED" });
+    var relatedLost = rows_("Reports")
+      .filter(function (report) {
+        return (
+          report.type === "LOST" &&
+          report.status === "OPEN" &&
+          report.ownerEmail === c.claimantEmail
+        );
+      })
+      .map(function (report) {
+        return { report: report, score: match_(report, item).score };
+      })
+      .filter(function (entry) {
+        return entry.score >= 3;
+      })
+      .sort(function (a, b) {
+        return b.score - a.score;
+      });
+    if (
+      relatedLost.length &&
+      (!relatedLost[1] || relatedLost[0].score > relatedLost[1].score)
+    ) {
+      update_("Reports", relatedLost[0].report.id, { status: "RETURNED" });
+    }
+    notify_(
+      c.claimantEmail,
+      "RETURN_CONFIRMED",
+      "Return confirmed",
+      "Both parties confirmed the item handover.",
+      item.id,
+    );
+    notify_(
+      item.ownerEmail,
+      "RETURN_CONFIRMED",
+      "Return confirmed",
+      "Both parties confirmed the item handover.",
+      item.id,
+    );
+    return { status: "RETURNED" };
+  }
+  return {
+    status: "APPROVED",
+    message:
+      "Your confirmation is saved; the other authorized party must also confirm.",
+  };
+}
+function find_(sheet, id) {
+  return rows_(sheet).filter(function (x) {
+    return String(x.id) === String(id);
+  })[0];
+}
+function isStaff_(email) {
+  return (
+    String(
+      PropertiesService.getScriptProperties().getProperty("STAFF_EMAILS") || "",
+    )
+      .toLowerCase()
+      .split(",")
+      .map(function (x) {
+        return x.trim();
+      })
+      .indexOf(email) >= 0
+  );
+}
+function notify_(email, type, title, body, itemId) {
+  add_("Notifications", {
+    id: Utilities.getUuid(),
+    userEmail: email,
+    type: type,
+    title: clean_(title, 100),
+    body: clean_(body, 400),
+    itemId: itemId,
+    read: false,
+    createdAt: new Date().toISOString(),
+  });
+  if (type === "POSSIBLE_MATCH") {
+    rows_("Watchlist")
+      .filter(function (w) {
+        return w.userEmail === email;
+      })
+      .forEach(function (w) {
+        if (w.itemId !== itemId) {
+          var lost = find_("Reports", w.itemId),
+            found = find_("Reports", itemId);
+          if (lost && found && match_(lost, found).score >= 3)
+            add_("Notifications", {
+              id: Utilities.getUuid(),
+              userEmail: email,
+              type: "WATCHLIST_MATCH",
+              title: "A new report may match your watchlist",
+              body: "A new possible match is available. Review its clues in the public board.",
+              itemId: itemId,
+              read: false,
+              createdAt: new Date().toISOString(),
+            });
+        }
+      });
+  }
+}
+function clean_(v, max) {
+  return String(v || "")
+    .replace(/[\u0000-\u001f]/g, " ")
+    .trim()
+    .substring(0, max);
+}
+function json(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(
+    ContentService.MimeType.JSON,
+  );
+}
+
+function addInfo_(b, u) {
+  var c = find_("Claims", b.claimId);
+  if (!c || c.claimantEmail !== u.email || c.status !== "MORE_INFO")
+    throw Error("Only the claimant can respond to an information request.");
+  var extra = clean_(b.additionalInfo, 800);
+  if (!extra) throw Error("Enter the requested additional information.");
+  var updated = clean_(
+    String(c.privateClues) + " Additional information: " + extra,
+    2000,
+  );
+  update_("Claims", c.id, {
+    privateClues: updated,
+    status: "SUBMITTED",
+    updatedAt: new Date().toISOString(),
+  });
+  var item = find_("Reports", c.itemId);
+  notify_(
+    item.ownerEmail,
+    "CLAIM_UPDATED",
+    "Claimant added information",
+    "New private details are ready for review.",
+    c.itemId,
+  );
+  return { status: "SUBMITTED" };
+}
+
+function resolveLostReport_(b, u) {
+  var item = find_("Reports", b.itemId);
+  if (!item || item.type !== "LOST" || item.ownerEmail !== u.email)
+    throw Error("Only the owner of this lost report can mark it recovered.");
+  if (item.status !== "OPEN")
+    throw Error("This lost report is already closed.");
+  update_("Reports", item.id, { status: "RETURNED" });
+  return { status: "RETURNED" };
+}
 
 
 
-function addInfo_(b,u){var c=find_('Claims',b.claimId);if(!c||c.claimantEmail!==u.email||c.status!=='MORE_INFO')throw Error('Only the claimant can respond to an information request.');var extra=clean_(b.additionalInfo,800);if(!extra)throw Error('Enter the requested additional information.');var updated=clean_(String(c.privateClues)+' Additional information: '+extra,2000);update_('Claims',c.id,{privateClues:updated,status:'SUBMITTED',updatedAt:new Date().toISOString()});var item=find_('Reports',c.itemId);notify_(item.ownerEmail,'CLAIM_UPDATED','Claimant added information','New private details are ready for review.',c.itemId);return{status:'SUBMITTED'}}
+
+
 
 
