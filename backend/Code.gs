@@ -6,7 +6,7 @@ const SHEETS = {
     "category",
     "description",
     "color",
-    "approx.Date",
+    "approxDate",
     "location",
     "ownerEmail",
     "status",
@@ -434,6 +434,15 @@ function myRecovery_(u) {
       delete x.userEmail;
       return x;
     });
+  var watchlist = rows_("Watchlist")
+    .filter(function (entry) {
+      return entry.userEmail === u.email;
+    })
+    .map(function (entry) {
+      var report = find_("Reports", entry.itemId);
+      return report ? { itemId: report.id, title: report.title, status: report.status } : null;
+    })
+    .filter(function (entry) { return entry !== null; });
   var matches = [];
   reports
     .filter(function (x) {
@@ -456,6 +465,7 @@ function myRecovery_(u) {
     }),
     claims: claims,
     notifications: notes,
+    watchlist: watchlist,
     matches: matches,
   };
 }
@@ -712,6 +722,9 @@ function resolveLostReport_(b, u) {
   update_("Reports", item.id, { status: "RETURNED" });
   return { status: "RETURNED" };
 }
+
+
+
 
 
 

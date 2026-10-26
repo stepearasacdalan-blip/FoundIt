@@ -1,3 +1,8 @@
+// Public deployment values: these are not secrets. Do not put a client secret here.
+const PUBLISHED_CONFIG = {
+  apiUrl: "https://script.google.com/macros/s/AKfycbzO6JWnFhU6erWcahE8h-hdVRmJXfF3XmuzNS47-hHL19rdQJ3kgdGDMRSFo4Vq3c0GIw/exec",
+  oauthClientId: "207291577644-s6ohbd8ps57nt4h6q52tma561jhlvank.apps.googleusercontent.com",
+};
 const CATEGORIES = [
   "Keys",
   "Wallet",
@@ -14,11 +19,13 @@ const CATEGORIES = [
 const $ = (s, r = document) => r.querySelector(s),
   $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const state = {
-  api: localStorage.getItem("foundit-api") || "",
-  clientId: localStorage.getItem("foundit-client") || "",
+  api: localStorage.getItem("foundit-api") || PUBLISHED_CONFIG.apiUrl,
+  clientId: localStorage.getItem("foundit-client") || PUBLISHED_CONFIG.oauthClientId,
   credential: sessionStorage.getItem("foundit-token") || "",
   user: null,
   items: [],
+  myReports: [],
+  watchlist: [],
   filter: { type: "", category: "" },
 };
 const dialogs = {
@@ -164,6 +171,11 @@ function populateCategories() {
 }
 function apiConfigured() {
   return /^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(state.api);
+}
+function updateSetupVisibility() {
+  const ready = apiConfigured() && state.clientId.endsWith(".apps.googleusercontent.com");
+  const showForPresenter = new URLSearchParams(location.search).get("setup") === "1";
+  $(".setup-details").hidden = ready && !showForPresenter;
 }
 async function request(action, data = {}) {
   if (!apiConfigured())
@@ -349,14 +361,48 @@ async function reportSubmit(e) {
     button.textContent = "Submit report";
   }
 }
+function renderWatchlist() {
+  const body = $("#watch-body");
+  if (!state.user) {
+    body.innerHTML = '<p>Sign in with Google to manage your saved lost-item reports.</p><button class="button" id="watch-signin" type="button">Sign in</button>';
+    $("#watch-signin").onclick = () => {
+      dialogs.watch.close();
+      dialogs.auth.showModal();
+      renderGoogle();
+    };
+    return;
+  }
+  const lostReports = state.myReports.filter((item) => item.type === "LOST" && item.status === "OPEN");
+  const watchedIds = new Set(state.watchlist.map((item) => item.itemId));
+  body.innerHTML = `<p>Signed in as ${safe(state.user.email)}. Save one of your open lost reports below. New possible matches appear in your Recovery Center.</p>`;
+  if (!lostReports.length) {
+    body.insertAdjacentHTML("beforeend", '<p class="muted">You do not have an open lost report yet. Submit a lost-item report first.</p>');
+    return;
+  }
+  lostReports.forEach((item) => {
+    const row = document.createElement("div");
+    row.className = "recovery-row";
+    row.innerHTML = `<div><b>${safe(item.title)}</b><small>${safe(item.category)} · ${safe(item.location)}</small></div>`;
+    const button = document.createElement("button");
+    button.className = "button button-small";
+    button.textContent = watchedIds.has(item.id) ? "Watching" : "Add to watchlist";
+    button.disabled = watchedIds.has(item.id);
+    button.onclick = () => saveWatch(item.id);
+    row.append(button);
+    body.append(row);
+  });
+}
 async function loadRecovery() {
   if (!state.user) return;
   try {
     const r = await request("myRecovery");
     const claims = r.claims || [],
       items = r.reports || [],
+      watchlist = r.watchlist || [],
       matches = r.matches || [],
       notifications = r.notifications || [];
+    state.myReports = items;
+    state.watchlist = watchlist;
     const root = $("#my-recovery");
     root.innerHTML = "";
     notifications.forEach((n) => {
@@ -372,7 +418,9 @@ async function loadRecovery() {
       if (i.type === "LOST") {
         const b = document.createElement("button");
         b.className = "text-button";
-        b.textContent = "Add to watchlist";
+        const watching = state.watchlist.some((entry) => entry.itemId === i.id);
+        b.textContent = watching ? "Watching" : "Add to watchlist";
+        b.disabled = watching;
         b.onclick = () => saveWatch(i.id);
         row.append(b);
         if (i.status === "OPEN") {
@@ -483,7 +531,8 @@ async function saveWatch(id) {
   try {
     await request("watchReport", { itemId: id });
     toast("Lost report added to your watchlist.");
-    loadRecovery();
+    await loadRecovery();
+    if (dialogs.watch.open) renderWatchlist();
   } catch (e) {
     toast(e.message);
   }
@@ -663,14 +712,26 @@ function init() {
       }),
   );
   $("#signout").onclick = signout;
-  $("#watchlist-open").onclick = () => dialogs.watch.showModal();
+  $("#watchlist-open").onclick = async () => {
+    if (!state.user) {
+      dialogs.auth.showModal();
+      $("#auth-status").textContent = "Sign in with the Google account you used for your lost report to manage its watchlist.";
+      renderGoogle();
+      return;
+    }
+    await loadRecovery();
+    renderWatchlist();
+    dialogs.watch.showModal();
+  };
   $("#client-id").value = state.clientId;
   $("#api-url").value = state.api;
+  updateSetupVisibility();
   $("#save-client").onclick = () => {
     state.clientId = $("#client-id").value.trim();
     state.api = $("#api-url").value.trim();
     localStorage.setItem("foundit-client", state.clientId);
     localStorage.setItem("foundit-api", state.api);
+    updateSetupVisibility();
     renderGoogle();
     toast("Configuration saved on this device.");
     refresh();
@@ -710,6 +771,13 @@ function init() {
   }
 }
 document.addEventListener("DOMContentLoaded", init);
+
+
+
+
+
+
+
 
 
 
