@@ -51,13 +51,5 @@ Open the project folder in VS Code and use Live Server to serve `index.html`. Go
 ## Limitations
 
 This is a class-project starter, not a production campus service. Photo matching estimates a broad color family; it does not recognize the object. SmartMatch results can be wrong and do not prove ownership. Review Apps Script permissions, quotas, privacy, and abuse protections before any real campus pilot.
-## Documentation map
 
-- [Project overview and recovery workflow](docs/PROJECT_OVERVIEW.md)
-- [Deployment guide](docs/DEPLOYMENT.md)
-- [Sitemap and wireframes](docs/SITEMAP_AND_WIREFRAMES.md)
-- [Testing record](docs/TESTING.md)
-- [Explained code snippets](docs/CODE_SNIPPETS.md)
-- [Asset sources and references](docs/ASSET_SOURCES.md)
-- [Security and privacy](docs/SECURITY_AND_PRIVACY.md)
 
