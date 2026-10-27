@@ -2,8 +2,8 @@
 
 ## Project-authored assets
 
-- `assets/images/campus-header.png` — campus banner image supplied/selected by the project author. Record the original photographer, source URL, and usage permission here if it was obtained from an external source. Do not claim a license that has not been checked.
-- Report photos — uploaded by users when submitting reports. They are application data, not bundled stock imagery. Use only photos appropriate for public display and avoid faces or sensitive identifying details.
+- `assets/images/campus-header.png` — campus banner image [supplied/selected by the project author](https://lpulaguna.edu.ph/wp-content/uploads/2022/05/IMG_7712-scaled.jpg).
+- Report photos — uploaded by users when submitting reports. They are application data, not bundled stock imagery. 
 - FoundIt logo, interface illustrations, CSS, HTML, and JavaScript — project files maintained in this repository.
 
 ## External services and references
