@@ -19,8 +19,3 @@ Updated 26 October 2026. Results distinguish user-reported checks from checks in
 | Two-party SafeReturn completion | Not yet verified | Requires claimant and authorized finder/staff to confirm the same approved handover. No completed return is claimed. |
 | Email/push notifications | Not implemented | Watchlist notices appear in the Recovery Center only; no external notification provider is configured. |
 
-## Before submission
-
-1. Confirm the published page and each main navigation link.
-2. On desktop and phone-sized viewports, capture screenshots of the actual site and label them `FoundIt-desktop.png` and `FoundIt-mobile.png` (or similar). Do not use the design reference image as evidence of the running app.
-3. Walk through watchlist save/reload/match and SafeReturn with the required accounts, then update this table only with observed results.
