@@ -54,12 +54,9 @@ This is a class-project starter, not a production campus service. Photo matching
 ## Documentation map
 
 - [Project overview and recovery workflow](docs/PROJECT_OVERVIEW.md)
-- [Setup guide](docs/SETUP_GUIDE.md)
-- [Google Sheets setup](docs/GOOGLE_SHEETS_SETUP.md)
 - [Deployment guide](docs/DEPLOYMENT.md)
 - [Sitemap and wireframes](docs/SITEMAP_AND_WIREFRAMES.md)
 - [Testing record](docs/TESTING.md)
-- [Submission checklist review](docs/SUBMISSION_CHECKLIST.md)
 - [Explained code snippets](docs/CODE_SNIPPETS.md)
 - [Asset sources and references](docs/ASSET_SOURCES.md)
 - [Security and privacy](docs/SECURITY_AND_PRIVACY.md)
